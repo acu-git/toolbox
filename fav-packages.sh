@@ -111,6 +111,7 @@ sys_pkgs=(
     parted       # Disk partitioning tool
     lnav         # Log file navigator
     logrotate    # Log file rotation utility
+    apache2-utils # Apache HTTP server utilities
 )
 # apt install -y "${sys_pkgs[@]}"
 install_packages "${sys_pkgs[@]}"
@@ -130,15 +131,16 @@ install_packages "${sec_pkgs[@]}"
 ###           Network Tools Packages          ###
 #################################################
 net_pkgs=(
-    iptables     # Packet filtering framework
-    tcpdump      # Network packet analyzer
-    dnsutils     # DNS utilities (dig, nslookup)
-    traceroute   # Network path tracing tool
-    ethtool      # Ethernet device settings
-    nmap         # Network scanner
-    netcat       # Network utility for reading/writing to network connections
-    nethogs      # Network traffic monitor
-    iperf3       # Network performance measurement tool
+    iptables        # Packet filtering framework
+    tcpdump         # Network packet analyzer
+    iputils-ping    # Ping utility
+    dnsutils        # DNS utilities (dig, nslookup)
+    traceroute      # Network path tracing tool
+    ethtool         # Ethernet device settings
+    nmap            # Network scanner
+    netcat-openbsd  # Network utility for reading/writing to network connections
+    nethogs         # Network traffic monitor
+    iperf3          # Network performance measurement tool
 )
 # apt install -y "${net_pkgs[@]}"
 install_packages "${net_pkgs[@]}"
