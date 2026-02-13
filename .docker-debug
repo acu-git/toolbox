@@ -1,0 +1,255 @@
+#!/usr/bin/env bash
+
+# ============================================================
+# Docker Debug Toolkit (Single Node Dev - Colorized Edition)
+# Namespace: dd*
+# ============================================================
+
+# ------------------------------------------------------------
+# 0. Color System
+# ------------------------------------------------------------
+
+if [ -t 1 ]; then
+  C_RESET="\033[0m"
+  C_BOLD="\033[1m"
+  C_DIM="\033[2m"
+
+  C_RED="\033[31m"
+  C_GREEN="\033[32m"
+  C_YELLOW="\033[33m"
+  C_BLUE="\033[34m"
+  C_MAGENTA="\033[35m"
+  C_CYAN="\033[36m"
+else
+  C_RESET=""
+  C_BOLD=""
+  C_DIM=""
+  C_RED=""
+  C_GREEN=""
+  C_YELLOW=""
+  C_BLUE=""
+  C_MAGENTA=""
+  C_CYAN=""
+fi
+
+_dd_line() {
+  printf "${C_DIM}------------------------------------------------------------${C_RESET}\n"
+}
+
+_dd_section() {
+  printf "\n${C_BOLD}${C_BLUE}▶ %s${C_RESET}\n" "$1"
+  _dd_line
+}
+
+_dd_subsection() {
+  printf "\n${C_BOLD}${C_CYAN}%s${C_RESET}\n" "$1"
+}
+
+_dd_error() {
+  printf "${C_RED}Error:${C_RESET} %s\n" "$1"
+}
+
+_dd_require_arg() {
+  if [ -z "$1" ]; then
+    _dd_error "Missing argument"
+    return 1
+  fi
+}
+
+# ------------------------------------------------------------
+# 1. Cluster Overview
+# ------------------------------------------------------------
+
+ddcluster() {
+  _dd_section "Cluster Overview"
+
+  _dd_subsection "Node Status"
+  docker node ls
+
+  _dd_subsection "Services"
+  docker service ls
+
+  _dd_subsection "Stacks"
+  docker stack ls
+}
+
+# ------------------------------------------------------------
+# 2. Stack Inspection
+# ------------------------------------------------------------
+
+ddstack() {
+  _dd_require_arg "$1" || return 1
+
+  _dd_section "Stack: $1"
+
+  _dd_subsection "Services"
+  docker stack services "$1" \
+    --format "table {{.Name}}\t{{.Mode}}\t{{.Replicas}}\t{{.Ports}}"
+
+  _dd_subsection "Tasks"
+  docker stack ps "$1" \
+    --format "table {{.Name}}\t{{.Node}}\t{{.CurrentState}}\t{{.Error}}"
+
+  _dd_subsection "Networks"
+  docker network ls \
+    --filter label=com.docker.stack.namespace="$1"
+}
+
+ddstackfail() {
+  _dd_require_arg "$1" || return 1
+
+  _dd_section "Failed Tasks: $1"
+  docker stack ps "$1" --no-trunc \
+    --format '{{.Name}} {{.CurrentState}} {{.Error}}' \
+    | grep -v "Running"
+}
+
+# ------------------------------------------------------------
+# 3. Service Deep Debug
+# ------------------------------------------------------------
+
+ddsvc() {
+  _dd_require_arg "$1" || return 1
+
+  _dd_section "Service: $1"
+
+  _dd_subsection "Metadata"
+  docker service inspect "$1" --pretty
+
+  _dd_subsection "Tasks"
+  docker service ps "$1" \
+    --format "table {{.Name}}\t{{.Node}}\t{{.CurrentState}}\t{{.Error}}"
+}
+
+ddsvclogs() {
+  _dd_require_arg "$1" || return 1
+  _dd_section "Logs: $1"
+  docker service logs -f --tail=200 "$1"
+}
+
+ddsvcexec() {
+  _dd_require_arg "$1" || return 1
+
+  cid=$(docker ps \
+    --filter label=com.docker.swarm.service.name="$1" \
+    -q | head -n1)
+
+  if [ -z "$cid" ]; then
+    _dd_error "No running container found"
+    return 1
+  fi
+
+  _dd_section "Exec into $cid"
+  docker exec -it "$cid" /bin/bash
+}
+
+ddsvcimage() {
+  _dd_require_arg "$1" || return 1
+  docker service inspect "$1" \
+    --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'
+}
+
+ddsvcrestart() {
+  _dd_require_arg "$1" || return 1
+  _dd_section "Rolling Restart: $1"
+  docker service update --force "$1"
+}
+
+# ------------------------------------------------------------
+# 4. Failure Detection
+# ------------------------------------------------------------
+
+ddfail() {
+  _dd_section "Cluster Failures"
+  docker service ps $(docker service ls -q) \
+    --no-trunc \
+    --format '{{.Name}} {{.CurrentState}} {{.Error}}' \
+    | grep -v "Running"
+}
+
+ddmismatch() {
+  _dd_section "Replica Mismatch"
+  docker service ls \
+    --format '{{.Name}} {{.Replicas}}' \
+    | awk -F'[ /]' '$2 != $3 {print $0}'
+}
+
+# ------------------------------------------------------------
+# 5. Networking
+# ------------------------------------------------------------
+
+ddstacknet() {
+  _dd_require_arg "$1" || return 1
+  _dd_section "Networks in Stack: $1"
+  docker network ls \
+    --filter label=com.docker.stack.namespace="$1"
+}
+
+ddnetinspect() {
+  _dd_require_arg "$1" || return 1
+  _dd_section "Network Inspect: $1"
+  docker network inspect "$1"
+}
+
+ddnetcontainers() {
+  _dd_require_arg "$1" || return 1
+  _dd_section "Containers on Network: $1"
+  docker network inspect "$1" \
+    --format '{{range $k,$v := .Containers}}{{$v.Name}} {{end}}'
+}
+
+# ------------------------------------------------------------
+# 6. Runtime & Resources
+# ------------------------------------------------------------
+
+ddstats() {
+  _dd_section "Resource Snapshot"
+  docker stats --no-stream \
+    --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}"
+}
+
+ddip() {
+  _dd_require_arg "$1" || return 1
+  docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$1"
+}
+
+ddinspect() {
+  _dd_require_arg "$1" || return 1
+  docker inspect "$1"
+}
+
+# ------------------------------------------------------------
+# 7. Safe Dev Cleanup
+# ------------------------------------------------------------
+
+ddprune() {
+  _dd_section "Pruning Stopped Containers + Dangling Images"
+  docker container prune -f
+  docker image prune -f
+}
+
+# ------------------------------------------------------------
+# 8. High-Signal Debug Bundle
+# ------------------------------------------------------------
+
+dddebug() {
+  _dd_require_arg "$1" || return 1
+
+  _dd_section "DEBUG SUMMARY: $1"
+
+  _dd_subsection "Services"
+  docker stack services "$1"
+
+  _dd_subsection "Failed Tasks"
+  ddstackfail "$1"
+
+  _dd_subsection "Replica Mismatch"
+  ddmismatch
+
+  _dd_subsection "Resource Snapshot"
+  docker stats --no-stream
+}
+
+# ============================================================
+# End of Toolkit
+# ============================================================
