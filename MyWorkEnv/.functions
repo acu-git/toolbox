@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+
+# Open a bash or sh shell in a container (falls back to sh if bash unavailable)
+dbash() {
+  docker exec -it "$(docker ps -qf "name=$1")" bash 2>/dev/null || docker exec -it "$(docker ps -qf "name=$1")" sh
+}
+
+# Show key details about a container: status, IP, ports, mounts
+dinspect() {
+  local container="$1"
+  echo "=== Status ==="
+  docker inspect "$container" --format 'State: {{.State.Status}} | Started: {{.State.StartedAt}}'
+  echo ""
+  echo "=== Network ==="
+  docker inspect "$container" --format '{{range $net, $conf := .NetworkSettings.Networks}}{{$net}}: {{$conf.IPAddress}}{{"\n"}}{{end}}'
+  echo ""
+  echo "=== Ports ==="
+  docker port "$container" 2>/dev/null || echo "No published ports"
+  echo ""
+  echo "=== Mounts ==="
+  docker inspect "$container" --format '{{range .Mounts}}{{.Type}}: {{.Source}} -> {{.Destination}}{{"\n"}}{{end}}'
+}
+
+
+
+# ----------------------------------------
+# Networking Debugging (Overlay Networks)
+# ----------------------------------------
+
+# Get the IP address of a container
+dip() {
+  docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$1"
+}
+
+# Show Networks for Stack
+dstacknet() {
+  docker network ls \
+    --filter label=com.docker.stack.namespace="$1"
+}
+
+# Inspect Overlay Network (Readable)
+dnetdeep() {
+  docker network inspect "$1" | jq '.[0] | {Name,Driver,Scope,Peers,Containers}'
+}
+
+# Show Containers Attached to Network
+dnetcont() {
+  docker network inspect "$1" \
+    --format '{{range $k,$v := .Containers}}{{$v.Name}} {{end}}'
+}
+
+
+# ----------------------------------------
+
+
+# Remove all stopped containers, unused images, networks, and build cache
+dclean() {
+  echo "Removing stopped containers..."
+  docker container prune -f
+
+  echo "Removing unused images..."
+  docker image prune -f
+
+  echo "Removing unused networks..."
+  docker network prune -f
+
+  echo "Removing build cache..."
+  docker builder prune -f
+
+  echo ""
+  echo "Disk usage after cleanup:"
+  docker system df
+}
+
+# Run a command in a container with the current directory mounted
+# Example: Run a Python script in a Python container
+# drun python:3.12 python myscript.py
+drun() {
+  local image="$1"
+  shift
+  docker run --rm -it -v "$(pwd):/work" -w /work "$image" "$@"
+}
